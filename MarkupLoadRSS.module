@@ -218,6 +218,10 @@ class MarkupLoadRSS extends WireData implements Module, IteratorAggregate, Count
 	 */
 	protected $error = '';
 
+	public function __construct() {
+		$this->cachePath = $this->config->paths->cache . $this->className() . '/';
+	}
+
 	/**
 	 * Define the cache path
 	 *
@@ -225,7 +229,6 @@ class MarkupLoadRSS extends WireData implements Module, IteratorAggregate, Count
 	 *
 	 */
 	public function init() {
-		$this->cachePath = $this->config->paths->cache . $this->className() . '/';
 		$this->items = new WireArray();
 		$this->multibyteSupport = function_exists("mb_strlen"); 
 	}
