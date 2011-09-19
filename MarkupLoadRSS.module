@@ -1,0 +1,498 @@
+<?php
+
+/**
+ * ProcessWire RSS Loader
+ * ======================
+ *
+ * Given an RSS feed URL, this module will pull it, and let you foreach() it 
+ * or render it. This module will also cache feeds that you retrieve with it.
+ * 
+ * 
+ * More Details
+ * ------------
+ *
+ * This module loads the given RSS feed and all data from it. It then populates 
+ * that data into a WireArray of Page-like objects. All of the fields in the RSS 
+ * <items> feed are accessible, so you use whatever the feed provides.
+ *
+ * The most common and expected field names in the RSS channel are: 
+ *
+ * $rss->title
+ * $rss->pubDate             (or $rss->date)
+ * $rss->description         (or $rss->body)
+ * $rss->link                (or $rss->url)
+ * $rss->created             (unix timestamp of pubDate)
+ *
+ * The most common and expected field names for each RSS item are:
+ *
+ * $item->title
+ * $item->pubDate            (or $item->date)
+ * $item->description        (or $item->body)
+ * $item->link               (or $item->url)
+ * $item->created            (unix timestamp of pubDate)
+ *
+ * For convenience and consistency, ProcessWire translates some common RSS 
+ * fields to the PW-equivalent naming style. You can choose to use either the 
+ * ProcessWire-style name or the traditional RSS name, as shown above.
+ *
+ *
+ * Example #1: Cycling through a feed
+ * ----------------------------------
+ * 
+ * $rss = $modules->get("MarkupLoadRSS"); 
+ * $rss->load("http://www.di.net/articles/rss/");
+ * 
+ * foreach($rss as $item) { 
+ * 	echo "<p>";
+ *	echo "<a href='{$item->url}'>{$item->title}</a> ";
+ *	echo $item->date . "<br /> ";
+ *	echo $item->body; 
+ * 	echo "</p>";
+ * }
+ * 
+ *
+ * Example #2: Using the predefined rendering
+ * ------------------------------------------
+ * 
+ * $rss = $modules->get("MarkupLoadRSS"); 
+ * echo $rss->render("http://www.di.net/articles/rss/");
+ *
+ *
+ * Example #3: Specifying options and using channel titles
+ * -------------------------------------------------------
+ *
+ * $rss = $modules->get("MarkupLoadRSS"); 
+ * $rss->limit = 5; 
+ * $rss->cache = 0; 
+ * $rss->maxLength = 255; 
+ * $rss->dateFormat = 'm/d/Y H:i:s';
+ * $rss->load("http://www.di.net/articles/rss/");
+ *
+ * echo "<h2>{$rss->title}</h2>";
+ * echo "<p>{$rss->description}</p>"; 
+ * echo "<ul>"; 
+ * 
+ * foreach($rss as $item) {
+ * 	echo "<li>" . $item->title . "</li>";
+ * }
+ * echo "</ul>";
+ * 
+ * 
+ *
+ * Options: 
+ * --------
+ * 
+ * Options should be set before calling load() or render(). 
+ *
+ * // specify that you want to load up to 3 items (default = 10)
+ * $rss->limit = 3; 		
+ * 
+ * // set the feed to cache for an hour (default = 120 seconds)
+ * // if you want to disable the cache, set it to 0. 
+ * $rss->cache = 3600;		
+ *
+ * // set the max length of any field, i.e. description (default = 2048)
+ * // field values longer than this will be truncated
+ * $rss->maxLength = 255; 
+ *
+ * // tell it to strip out any HTML tags (default = true)
+ * $rss->stripTags = true;
+ *
+ * // tell it to encode any entities in the feed (default = true); 
+ * $rss->encodeEntities = true; 
+ *
+ * // set the date format used for output (use PHP date string)
+ * $rss->dateFormat = "Y-m-d g:i a";
+ *
+ * See the $options array in the class for more options, as well as 
+ * all the markup customization options or when using render().
+ *
+ * 
+ * Handling Errors 
+ * ---------------
+ * 
+ * If an error occurred when loading the feed, the $rss object will 
+ * have 0 items in it: 
+ * 
+ * $rss->load("..."); 
+ * if(!count($rss)) { error } 
+ *
+ * In addition, the $rss->error property always contains a detailed
+ * description of what error occurred: 
+ *
+ * if($rss->error) { echo "<p>{$rss->error}</p>"; } 
+ *
+ * I recommend only checking for or reporting errors when you are 
+ * developing and testing. On production sites you should skip 
+ * error checking/testing, as blank output is a clear indication
+ * of an error. This module will not throw runtime exceptions so 
+ * if an error occurs, it's not going to halt the site. 
+ *
+ *
+ * 
+ *
+ * ProcessWire 2.x 
+ * Copyright (C) 2011 by Ryan Cramer 
+ * Licensed under GNU/GPL v2, see LICENSE.TXT
+ * 
+ * http://www.processwire.com
+ * http://www.ryancramer.com
+ *
+ */
+
+class MarkupLoadRSS extends WireData implements Module, IteratorAggregate, Countable {
+
+	public static function getModuleInfo() {
+		return array(
+			'title' => 'Load an RSS feed', 
+			'summary' => 'Given an RSS feed URL, this module will pull it, cache it, and let you foreach() it or render it.', 
+			'version' => 100, 
+			'permanent' => false, 
+			'singular' => false, 
+			'autoload' => false, 
+			);
+	}
+
+	/**
+	 * Configurable options provided by this module
+	 *
+	 */
+	protected $options = array(
+
+		'limit' => 10, 				// Max number of items to load from the feed (default: 10)
+		'cache' => 120, 			// Number of seconds to cache, or 0 to skip caching (default = 2 minutes)
+		'maxLength' => 2048,			// The max number of characters allowed in any text from the feed (typically to truncate the description)
+		'stripTags' => true, 			// Strip any markup tags that appear in the feed? (default: true)
+		'encodeEntities' => true, 		// Whether to automatically decode and re-encode the entities for all fields (default: true)
+		'dateFormat' => "F j, Y, g:i a",	// Default date format to use when rendering the feed's output 
+
+		// when stripTags is on, it will first replace perform these case insensitive replacements: 
+		'replacements' => array(		
+			'<br />' => ' ',
+			'<br>' => ' ',
+			'</p>' => ' ',
+			"\n" => ' ',
+			"\r" => ' ',
+		),
+
+		// markup customization for when using render():
+		'listOpen' => "\n<ul class='MarkupLoadRSS'>",
+		'listClose' => "\n</ul>",
+		'itemOpen' => "\n\t<li>",
+		'itemClose' => "\n\t</li>",
+		'itemLinkOpen' => "\n\t\t<a href='{href}'>", 
+		'itemLinkClose' => "</a>", 
+		'itemDateOpen' => " \n\t\t<time datetime='{datetime}'>", 
+		'itemDateClose' => "</time>", 
+		'itemDescriptionOpen' => "\n\t\t<div>", 
+		'itemDescriptionClose' => "</div>",
+		); 
+
+	/**
+	 * Information about the RSS channel, populated after load()
+	 *
+	 */
+	protected $channel = array(
+		'title' => '',
+		'description' => '', 
+		'link' => '',
+		'pubDate' => '', 
+		'created' => 0, // same as pubDate but as a unix timestamp
+		); 
+
+	/**
+	 * Items in the RSS feed, after they are loaded
+	 *
+	 */
+	protected $items = null;
+
+	/**
+	 * Path where the XML cache file is stored
+	 *
+	 */
+	protected $cachePath; 
+
+	/**
+	 * Last error that occurred
+	 *
+	 */
+	protected $error = '';
+
+	/**
+	 * Define the cache path
+	 *
+	 * Should be done here in the construct rather than the init() because init() is not called on install/uninstall
+	 *
+	 */
+	public function init() {
+		$this->cachePath = $this->config->paths->cache . $this->className() . '/';
+		$this->items = new WireArray();
+		$this->multibyteSupport = function_exists("mb_strlen"); 
+	}
+
+	/**
+	 * Set a configuration option
+	 *
+	 * @param string $key Option name
+	 * @param string|int $value Option value
+	 * @return this
+	 *
+	 */
+	public function set($key, $value) {
+		if($key == 'options' && is_array($value)) $this->options = array_merge($this->options, $value); 
+			else if(array_key_exists($key, $this->options)) $this->options[$key] = $value; 
+			else return parent::set($key, $value); 
+
+		return $this;
+	}
+
+	/**
+	 * Gets a config option or $channel info
+	 *
+	 */
+	public function get($key) {
+		if($key == 'error') return $this->error; 
+
+		//  translate common PW-style names to what they would be in the feed
+		if($key == 'url') $key == 'link';
+			else if($key == 'date') $key = 'pubDate';
+			else if($key == 'body') $key = 'description';
+
+		if(array_key_exists($key, $this->channel)) return $this->channel[$key]; 
+		if(array_key_exists($key, $this->options)) return $this->options[$key];
+
+		return parent::get($key);
+	}
+
+	/**
+	 * Cleans text string from a feed before storage in our object
+	 *
+	 */
+	protected function cleanText($value) {
+
+		if($this->options['stripTags']) {
+			if(count($this->options['replacements'])) { 
+				$value = str_ireplace(array_keys($this->options['replacements']), array_values($this->options['replacements']), $value); 
+			}
+			$value = trim(strip_tags($value)); 
+		}
+
+                if($this->multibyteSupport) {
+                        if(mb_strlen($value, "UTF-8") > $this->options['maxLength']) {
+				$value = mb_substr($value, 0, $this->options['maxLength'], "UTF-8");
+			}
+
+                } else {
+                        if(strlen($value) > $this->options['maxLength']) {
+				$value = substr($value, 0, $this->options['maxLength']);
+			}
+                }
+
+		if($this->options['encodeEntities']) {
+			$value = html_entity_decode($value, ENT_QUOTES, "UTF-8"); 
+			$value = htmlentities($value, ENT_QUOTES, "UTF-8"); 
+		}
+
+		return $value; 
+	}
+
+	/**
+	 * Load an RSS feed from the given URL
+	 *
+	 * @param string $url Full URL to RSS feed (including http://)
+	 * @return this
+	 *
+	 */
+	public function load($url) {
+
+		$this->items = new WireArray();
+		$xmlData = $this->loadXmlData($url); 
+		$rss = simplexml_load_string($xmlData);
+
+		if(!$rss) {
+			$msg = "Unable to load RSS feed at " . htmlentities($url) . ": \n";
+			foreach(libxml_get_errors() as $error) $msg .= $error . " \n";
+			$this->error($msg); 
+			return $this;
+		}
+
+		$this->channel['title'] = $this->cleanText((string) $rss->channel->title);
+		$this->channel['description'] = $this->cleanText((string) $rss->channel->description);
+		$this->channel['link'] = $this->cleanText((string) $rss->channel->link);
+		$this->channel['created'] = strtotime((string) $rss->channel->pubDate); 
+		$this->channel['pubDate'] = date($this->options['dateFormat'], $this->channel['created']); 
+
+		$n = 0;
+
+		foreach($rss->channel->item as $item) {
+
+			$a = new MarkupLoadRSSItem();
+
+			foreach($item as $key => $value) {
+
+				$value = (string) $value; 
+
+				if($key == 'pubDate') {
+					$value = strtotime($value); 
+					$a->set('created', $value); 
+					$value = date($this->options['dateFormat'], $value); 
+
+				} else { 
+					$value = $this->cleanText($value);
+				}
+
+				$a->set($key, $value);
+			}
+
+			$this->items->add($a); 
+
+			if(++$n >= $this->options['limit']) break;
+		}
+
+		return $this; 
+	}
+
+
+	/**
+	 * Load XML data from either the RSS URL or the cache file
+	 *
+	 */
+	protected function loadXmlData($url) {
+
+		$cacheFile = $this->cachePath . md5($url) . '.xml.cache';
+
+                if(!is_file($cacheFile) || time() - filemtime($cacheFile) > $this->options['cache']) {
+
+                        $xmlData = @file_get_contents($url); 
+
+			if($xmlData === false) {
+				$this->error("Unable to load " . htmlentities($url));
+				return false;
+
+			} else if($this->options['cache']) {
+				@file_put_contents($cacheFile, $xmlData, LOCK_EX);
+			}
+
+                } else {
+
+			$xmlData = file_get_contents($cacheFile); 
+			if($xmlData === false) {
+				$this->error("Unable to load XML data cache");
+				return false;
+			}
+		}
+
+		return $xmlData; 	
+	}
+
+	/**
+	 * Render the markup for data retrieved from the RSS feed
+	 *
+	 */
+	public function render($url = '') {
+		if($url) $this->load($url); 
+		$out = $this->options['listOpen']; 
+		foreach($this as $item) {
+			$out .= $this->renderItem($item); 
+		}
+		$out .= $this->options['listClose']; 
+		return $out; 
+	}
+
+	/**
+	 * Render a single item, as used by the render() method
+	 *
+	 */
+	protected function renderItem($item) {
+
+		$out = 	$this->options['itemOpen'] . 
+			str_replace('{href}', $item->link, $this->options['itemLinkOpen']) . 
+			htmlentities($item->title, ENT_QUOTES, "UTF-8") . 	
+			$this->options['itemLinkClose'] . 
+			str_replace('{datetime}', date('c', $item->created), $this->options['itemDateOpen']) . date($this->options['dateFormat'], $item->created) . $this->options['itemDateClose'] . 
+			$this->options['itemDescriptionOpen'] . $item->description . $this->options['itemDescriptionClose'] . 
+			$this->options['itemClose']; 
+
+		return $out; 
+	}
+
+	/**
+	 * Make this class iterable
+	 *
+	 */
+	public function getIterator() {
+		return $this->items; 		
+	}
+
+	/**
+	 * Make this class countable
+	 *
+	 */
+	public function count() {
+		return count($this->items); 
+	}
+
+	/**
+	 * Create a directory where we will store our cache files
+	 *
+	 */
+	public function ___install() {
+
+		if(ini_get('allow_url_fopen') == "0") {
+			throw new WireException("Cannot install '{$this->className}' because it requires PHP's 'allow_url_fopen' which is disabled on your server."); 
+		}
+
+		$path = $this->cachePath; 
+		if(!is_dir($path)) {
+			if(!mkdir($path)) throw new WireException("Unable to create directory: $path"); 
+			if($this->config->chmodDir) chmod($path, octdec($this->config->chmodDir));
+		}
+	}
+
+	/**
+	 * Remove cache files and directory
+	 *
+	 */
+	public function ___uninstall() {
+		$dir = new DirectoryIterator($this->cachePath); 
+		foreach($dir as $file) {
+			if($file->isDir() || $file->isDot()) continue;
+			if($file->isFile() && preg_match('/\.xml.cache$/', $file->getFilename())) unlink($file->getPathname());
+		}
+		rmdir($this->cachePath); 
+	}
+
+	/**
+	 * Save the error message and send it on to PW
+	 *
+	 */
+	public function error($text) {
+		$this->error = $text; 		
+		return parent::error($text); 
+	}
+
+
+}
+
+/**
+ * Class to store data for an individual RSS item
+ *
+ */
+class MarkupLoadRSSItem extends WireData { 
+
+	/**
+	 * Translate common PW-Page style var names to RSS feed names, for consistency/convenience
+	 *
+	 */
+	public function get($key) {
+		if($key == 'url') $key = 'link';
+			else if($key == 'date') $key = 'pubDate';
+			else if($key == 'body') $key = 'description'; 
+
+		return parent::get($key); 
+	}
+
+}
+
+
+
