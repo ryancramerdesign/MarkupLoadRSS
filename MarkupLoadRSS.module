@@ -469,9 +469,9 @@ class MarkupLoadRSS extends WireData implements Module, IteratorAggregate, Count
 	 * Save the error message and send it on to PW
 	 *
 	 */
-	public function error($text) {
+	public function error($text, $flags = 0) {
 		$this->error = $text; 		
-		return parent::error($text); 
+		return parent::error($text, $flags); 
 	}
 
 
