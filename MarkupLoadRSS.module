@@ -340,6 +340,8 @@ class MarkupLoadRSS extends WireData implements Module, IteratorAggregate, Count
 					$a->set('created', $value); 
 					$value = date($this->options['dateFormat'], $value); 
 
+				} else if ($key == 'enclosure') {
+					$value = $item->enclosure['url'];
 				} else { 
 					$value = $this->cleanText($value);
 				}
