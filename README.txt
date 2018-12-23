@@ -1,12 +1,11 @@
-ProcessWire RSS Loader
-======================
+ProcessWire RSS Loader for ProcessWire 3.x
+==========================================
 
 Given an RSS feed URL, this module will pull it, and let you foreach() it 
 or render it. This module will also cache feeds that you retrieve with it.
 
-For ProcessWire 2.1+
-
-Copyright 2011 by Ryan Cramer
+Copyright 2011-2018 by Ryan Cramer
+License: MPL 2.0
 
 
 INSTALLATION
@@ -30,7 +29,7 @@ Example #1: Cycling through a feed
 ----------------------------------
 
     $rss = $modules->get("MarkupLoadRSS"); 
-    $rss->load("http://www.di.net/articles/rss/");
+    $rss->load("http://www.domain.com/articles/rss/");
 
     foreach($rss as $item) { 
         echo "<p>";
@@ -45,7 +44,7 @@ Example #2: Using the built-in rendering
 ----------------------------------------
 
     $rss = $modules->get("MarkupLoadRSS");
-    echo $rss->render("http://www.di.net/articles/rss/");
+    echo $rss->render("http://www.domain.com/articles/rss/");
 
 
 Example #3: Specifying options and using channel titles
@@ -58,7 +57,7 @@ Example #3: Specifying options and using channel titles
     $rss->maxLength = 255; 
     $rss->dateFormat = 'm/d/Y H:i:s';
 
-    $rss->load("http://www.di.net/articles/rss/");
+    $rss->load("http://www.domain.com/articles/rss/");
 
     echo "<h2>{$rss->title}</h2>";
     echo "<p>{$rss->description}</p>";
@@ -156,9 +155,9 @@ if an error occurs, it's not going to halt the site.
 SUPPORT
 =======
 
-Visit the ProcessWire forum at http://processwire.com/talk/
+Visit the ProcessWire forum at https://processwire.com/talk/
 
 
-Copyright 2011 by Ryan Cramer
+Copyright 2011-2018 by Ryan Cramer
 
 
